@@ -206,31 +206,45 @@
 
 <!-- SESSION TAB -->
 <div class="tab-content" id="tabContent-session">
-  <div class="session-header">
-    <div class="session-name-row">
-      <input class="session-name-input" id="sessionNameInput" placeholder="会の名前" onchange="saveSessionName()">
-    </div>
-    <div class="session-meta" id="sessionMetaLabel"></div>
-  </div>
-  <div class="card">
-    <div class="card-title">⚙️ 設定</div>
-    <div class="global-condition">
-      <span class="global-label">🎾 ミックス優先</span>
-      <label class="switch"><input type="checkbox" id="mixPriority"><span class="slider"></span></label>
-    </div>
-    <div style="margin-top:8px;">
-      <div style="font-size:11px;color:var(--text-soft);margin-bottom:4px;">個人出場調整</div>
-      <div id="conditionList"><div style="font-size:12px;color:var(--text-soft);">参加者をONにすると表示されます</div></div>
+  <!-- 会未開始 -->
+  <div id="sessionStart" style="display:none;">
+    <div class="empty-state" style="padding:48px 20px;">
+      <div class="icon">🎾</div>
+      <p style="margin-bottom:20px;">会がまだ始まっていません</p>
+      <button class="btn btn-yellow btn-full" onclick="startSession()" style="max-width:240px;margin:0 auto;display:block;">▶️ 今日の会を始める</button>
     </div>
   </div>
-  <div class="card">
-    <div class="card-title">🎾 試合を追加生成</div>
-    <div class="generate-row">
-      <div class="field"><label>追加する試合数</label><input type="number" id="matchCount" value="4" min="1" max="20"></div>
+  <!-- 会開催中 -->
+  <div id="sessionActive" style="display:none;">
+    <div class="session-header">
+      <div class="session-name-row">
+        <input class="session-name-input" id="sessionNameInput" placeholder="会の名前" onchange="saveSessionName()">
+      </div>
+      <div class="session-meta" id="sessionMetaLabel"></div>
     </div>
-    <button class="btn btn-yellow btn-full" onclick="onGenerateMatches()">🎲 組み合わせを追加生成</button>
+    <div class="card">
+      <div class="card-title">⚙️ 設定</div>
+      <div class="global-condition">
+        <span class="global-label">🎾 ミックス優先</span>
+        <label class="switch"><input type="checkbox" id="mixPriority"><span class="slider"></span></label>
+      </div>
+      <div style="margin-top:8px;">
+        <div style="font-size:11px;color:var(--text-soft);margin-bottom:4px;">個人出場調整</div>
+        <div id="conditionList"><div style="font-size:12px;color:var(--text-soft);">参加者をONにしてください</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">🎾 試合を追加生成</div>
+      <div class="generate-row">
+        <div class="field"><label>追加する試合数</label><input type="number" id="matchCount" value="1" min="1" max="20"></div>
+      </div>
+      <button class="btn btn-yellow btn-full" onclick="onGenerateMatches()">🎲 組み合わせを追加生成</button>
+    </div>
+    <div id="matchList"></div>
+    <div style="margin-bottom:16px;">
+      <button class="btn btn-danger btn-full" onclick="confirmDiscardSession()">🗑 この会を破棄する</button>
+    </div>
   </div>
-  <div id="matchList"></div>
 </div>
 
 <!-- RESULTS TAB -->
@@ -257,10 +271,24 @@
 
 <!-- STATS TAB -->
 <div class="tab-content" id="tabContent-stats">
+  <!-- 勝利数ランキング -->
+  <div class="stat-card">
+    <div class="stat-title">🥇 勝利数ランキング</div>
+    <div class="chart-wrap"><canvas id="chartWins"></canvas></div>
+    <div id="statsWinsRanking"><div class="empty-state"><div class="icon">📊</div><p>会を保存すると表示されます</p></div></div>
+  </div>
+  <!-- 勝率ランキング -->
   <div class="stat-card">
     <div class="stat-title">
-      🏆 累計個人成績ランキング
+      <span>📈 勝率ランキング</span>
       <button class="btn btn-ghost btn-xs" onclick="shareStats()">📤 共有</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12px;color:var(--text-soft);">
+      <span>最低試合数</span>
+      <input type="number" id="minGamesInput" min="1" value="5"
+        style="width:60px;font-size:13px;padding:4px 8px;"
+        onchange="saveMinGames()">
+      <span>試合以上</span>
     </div>
     <div class="chart-wrap"><canvas id="chartWinRate"></canvas></div>
     <div id="statsRanking"><div class="empty-state"><div class="icon">📊</div><p>会を保存すると表示されます</p></div></div>
@@ -276,7 +304,6 @@
     </div>
     <div id="statsOpponents"><div class="empty-state"><div class="icon">⚔️</div><p>データが溜まると表示されます</p></div></div>
   </div>
-  <!-- stats share preview (hidden) -->
   <div id="statsSharePreview" style="display:none"></div>
 </div>
 
@@ -459,27 +486,55 @@ function saveEditMember(){
 
 // ===== SESSION =====
 function getCheckedInMembers(){return members.filter(m=>m.checkedIn);}
-function ensureSession(){
-  const active=sessions.find(s=>s.id===currentSessionId&&!s.saved);
-  if(!active){
-    const today=new Date().toLocaleDateString('ja-JP');
-    const todaySession=sessions.find(s=>s.date===today&&!s.saved);
-    if(todaySession){currentSessionId=todaySession.id;return;}
-    const ns={id:uid(),date:today,name:today+'の会',matches:[],globalMatchCounter:0,saved:false};
-    sessions.push(ns);currentSessionId=ns.id;saveAll();
-  }
+
+function startSession(){
+  const today=new Date().toLocaleDateString('ja-JP');
+  const ns={id:uid(),date:today,name:today+'の会',matches:[],globalMatchCounter:0,saved:false};
+  sessions.push(ns);
+  currentSessionId=ns.id;
+  saveAll();
+  renderSession();
 }
-function currentSession(){return sessions.find(s=>s.id===currentSessionId);}
+
+function confirmDiscardSession(){
+  showModal('この会を破棄しますか？','試合・結果がすべて削除されます。この操作は取り消せません。',()=>{
+    sessions=sessions.filter(s=>s.id!==currentSessionId);
+    currentSessionId=null;
+    saveAll();
+    renderSession();
+    showToast('会を破棄しました');
+  },'破棄する',true);
+}
+
+function ensureSession(){
+  // 自動生成しない。currentSessionIdが有効かだけ確認
+  const active=sessions.find(s=>s.id===currentSessionId&&!s.saved);
+  if(!active) currentSessionId=null;
+}
+
+function currentSession(){return sessions.find(s=>s.id===currentSessionId&&!s.saved);}
+
 function saveSessionName(){
   const sess=currentSession();
   if(sess){sess.name=document.getElementById('sessionNameInput').value;saveAll();}
 }
+
 function renderSession(){
-  const sess=currentSession();if(!sess) return;
+  const sess=currentSession();
+  const startEl=document.getElementById('sessionStart');
+  const activeEl=document.getElementById('sessionActive');
+  if(!sess){
+    startEl.style.display='block';
+    activeEl.style.display='none';
+    return;
+  }
+  startEl.style.display='none';
+  activeEl.style.display='block';
   const participants=getCheckedInMembers();
   document.getElementById('sessionNameInput').value=sess.name||sess.date+'の会';
   document.getElementById('sessionMetaLabel').textContent='参加者 '+participants.length+'人';
-  renderConditionList();renderMatches();
+  renderConditionList();
+  renderMatches();
 }
 function renderConditionList(){
   const el=document.getElementById('conditionList');
@@ -676,11 +731,25 @@ function getAllMatches(){
   sessions.filter(s=>s.saved).forEach(s=>all.push(...s.matches));
   return all;
 }
+
+function getMinGames(){
+  try { return parseInt(localStorage.getItem('minGames')||'5')||5; } catch(e){ return 5; }
+}
+function saveMinGames(){
+  const val=parseInt(document.getElementById('minGamesInput').value)||5;
+  try{ localStorage.setItem('minGames', val); }catch(e){}
+  renderStats();
+}
+
 function renderStats(){
   const all=getAllMatches();
+  // minGames入力欄を現在値に設定
+  const mg=getMinGames();
+  const inp=document.getElementById('minGamesInput');
+  if(inp&&inp.value==='') inp.value=mg;
+  renderWinsRanking(all);
   renderStatsRanking(all);
   renderPairStats(all);
-  // セレクトを先に更新してから描画
   updateOppSelect();
   renderOpponentStats(all);
 }
@@ -690,21 +759,43 @@ function updateOppSelect(){
   sel.innerHTML=members.map(m=>`<option value="${m.id}">${m.name}</option>`).join('');
   if(curVal&&members.find(m=>m.id===curVal)) sel.value=curVal;
 }
+
+function renderWinsRanking(all){
+  const el=document.getElementById('statsWinsRanking');
+  const sorted=calcStats(all).filter(s=>s.played>0).sort((a,b)=>b.wins-a.wins);
+  const ctx=document.getElementById('chartWins').getContext('2d');
+  if(window.winsChart){window.winsChart.destroy();window.winsChart=null;}
+  if(sorted.length===0){el.innerHTML='<div class="empty-state"><div class="icon">📊</div><p>会を保存すると表示されます</p></div>';return;}
+  const top=sorted.slice(0,8);
+  window.winsChart=new Chart(ctx,{type:'bar',data:{labels:top.map(s=>s.name),datasets:[{label:'勝利数',data:top.map(s=>s.wins),backgroundColor:top.map(s=>s.gender==='M'?'rgba(21,101,192,0.7)':s.gender==='F'?'rgba(229,57,53,0.7)':'rgba(120,144,156,0.7)'),borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{stepSize:1}}}}});
+  const rankIcon=['🥇','🥈','🥉'];
+  el.innerHTML=`<table class="result-table"><thead><tr><th>順位</th><th>名前</th><th>参加</th><th>勝</th><th>負</th><th>勝率</th></tr></thead><tbody>
+    ${sorted.map((s,i)=>{const r=Math.round(s.wins/s.played*100);return`<tr><td class="${i===0?'rank-1':i===1?'rank-2':i===2?'rank-3':''}">${rankIcon[i]||i+1}</td><td style="text-align:left"><span class="chip ${genderChipClass(s.gender)}">${genderLabel(s.gender)}</span>${s.name}</td><td>${s.played}</td><td style="color:var(--green-mid);font-weight:700">${s.wins}</td><td style="color:var(--red)">${s.losses}</td><td>${r}%</td></tr>`;}).join('')}
+  </tbody></table>`;
+}
+
 function renderStatsRanking(all){
   const el=document.getElementById('statsRanking');
-  const sorted=calcStats(all);
-  const hasData=sorted.some(s=>s.played>0);
+  const minGames=parseInt(document.getElementById('minGamesInput')?.value)||getMinGames();
+  const allSorted=calcStats(all);
+  const sorted=allSorted.filter(s=>s.played>=minGames).sort((a,b)=>(b.wins/b.played)-(a.wins/a.played));
+  const excluded=allSorted.filter(s=>s.played>0&&s.played<minGames);
   const ctx=document.getElementById('chartWinRate').getContext('2d');
   if(winRateChart){winRateChart.destroy();winRateChart=null;}
-  if(hasData){
-    const top=sorted.filter(s=>s.played>0).slice(0,8);
-    winRateChart=new Chart(ctx,{type:'bar',data:{labels:top.map(s=>s.name),datasets:[{label:'勝率(%)',data:top.map(s=>Math.round(s.wins/s.played*100)),backgroundColor:top.map(s=>s.gender==='M'?'rgba(21,101,192,0.7)':s.gender==='F'?'rgba(229,57,53,0.7)':'rgba(120,144,156,0.7)'),borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,max:100,ticks:{callback:v=>v+'%'}}}}});
-    el.innerHTML=`<table class="result-table"><thead><tr><th>順位</th><th>名前</th><th>参加</th><th>勝</th><th>負</th><th>勝率</th></tr></thead><tbody>
-      ${sorted.filter(s=>s.played>0).map((s,i)=>{const rankIcon=['🥇','🥈','🥉'];const r=Math.round(s.wins/s.played*100);return`<tr><td class="${i===0?'rank-1':i===1?'rank-2':i===2?'rank-3':''}">${rankIcon[i]||i+1}</td><td style="text-align:left"><span class="chip ${genderChipClass(s.gender)}">${genderLabel(s.gender)}</span>${s.name}</td><td>${s.played}</td><td style="color:var(--green-mid);font-weight:700">${s.wins}</td><td style="color:var(--red)">${s.losses}</td><td style="font-weight:700">${r}%</td></tr>`;}).join('')}
-    </tbody></table>`;
-  } else {
-    el.innerHTML='<div class="empty-state"><div class="icon">📊</div><p>会を保存すると表示されます</p></div>';
+  if(sorted.length===0){
+    el.innerHTML=`<div class="empty-state"><div class="icon">📊</div><p>${minGames}試合以上の人がいません</p></div>`;
+    return;
   }
+  const top=sorted.slice(0,8);
+  winRateChart=new Chart(ctx,{type:'bar',data:{labels:top.map(s=>s.name),datasets:[{label:'勝率(%)',data:top.map(s=>Math.round(s.wins/s.played*100)),backgroundColor:top.map(s=>s.gender==='M'?'rgba(21,101,192,0.7)':s.gender==='F'?'rgba(229,57,53,0.7)':'rgba(120,144,156,0.7)'),borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,max:100,ticks:{callback:v=>v+'%'}}}}});
+  const rankIcon=['🥇','🥈','🥉'];
+  let html=`<table class="result-table"><thead><tr><th>順位</th><th>名前</th><th>参加</th><th>勝</th><th>負</th><th>勝率</th></tr></thead><tbody>
+    ${sorted.map((s,i)=>{const r=Math.round(s.wins/s.played*100);return`<tr><td class="${i===0?'rank-1':i===1?'rank-2':i===2?'rank-3':''}">${rankIcon[i]||i+1}</td><td style="text-align:left"><span class="chip ${genderChipClass(s.gender)}">${genderLabel(s.gender)}</span>${s.name}</td><td>${s.played}</td><td style="color:var(--green-mid);font-weight:700">${s.wins}</td><td style="color:var(--red)">${s.losses}</td><td style="font-weight:700">${r}%</td></tr>`;}).join('')}
+  </tbody></table>`;
+  if(excluded.length>0){
+    html+=`<div style="font-size:11px;color:var(--text-soft);margin-top:8px;padding:6px 4px;border-top:1px solid var(--border);">対象外（${minGames}試合未満）：${excluded.map(s=>`${s.name}(${s.played}試合)`).join('、')}</div>`;
+  }
+  el.innerHTML=html;
 }
 function renderPairStats(all){
   const el=document.getElementById('statsPairs');
@@ -869,7 +960,12 @@ function flipCoin(){
 }
 
 // ===== INIT =====
-loadAll();renderMembers();ensureSession();renderSession();
+loadAll();
+ensureSession();
+renderMembers();
+renderSession();
+// minGames初期値セット
+try{ const mg=getMinGames(); const inp=document.getElementById('minGamesInput'); if(inp) inp.value=mg; }catch(e){}
 
 // Service Worker
 if ('serviceWorker' in navigator) {
